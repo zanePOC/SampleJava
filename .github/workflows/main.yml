@@ -1,4 +1,4 @@
-name: Build and Deploy Java App to S3
+name: Build and Deploy Java App to S3 bucket
 
 on:
   workflow_dispatch:

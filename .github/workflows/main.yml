@@ -1,56 +1,57 @@
-name: CI/CD Pipeline
+name: Build and Deploy Java App to S3
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        description: 'Target environment'
+        options:
+          - dev
+          - sit
+          - uat
+          - prod
+        required: true
 
 jobs:
-  build-job:
-    name: Build
+  build-and-deploy:
     runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ap-southeast-1  # Change to your region
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Placeholder: Add build steps here
-      - name: Build step
-        run: echo "Build commands go here"
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-  unit-test-job:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    needs: build-job
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Build with Maven
+        run: mvn clean package -DskipTests
 
-      # Placeholder: Add unit test steps here
-      - name: Run unit tests
-        run: echo "Unit test commands go here"
+      - name: Set S3 Bucket Name
+        id: set-bucket
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            dev)   echo "bucket=mycompany-dev-app-bucket" >> $GITHUB_OUTPUT ;;
+            sit)   echo "bucket=mycompany-sit-app-bucket" >> $GITHUB_OUTPUT ;;
+            uat)   echo "bucket=mycompany-uat-app-bucket" >> $GITHUB_OUTPUT ;;
+            prod)  echo "bucket=mycompany-prod-app-bucket" >> $GITHUB_OUTPUT ;;
+          esac
 
-  lint-job:
-    name: Lint
-    runs-on: ubuntu-latest
-    needs: build-job
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # Placeholder: Add linting steps here
-      - name: Run linter
-        run: echo "Lint commands go here"
-
-  deploy-job:
-    name: Deploy
-    runs-on: ubuntu-latest
-    needs: [unit-test-job, lint-job]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Placeholder: Add deployment steps here
-      - name: Deploy
-        run: echo "Deployment commands go here"
+      - name: Upload Artifact to S3
+        run: |
+          ARTIFACT=$(find target -name "*.jar" | head -n 1)
+          echo "Uploading $ARTIFACT to s3://${{ steps.set-bucket.outputs.bucket }}/app/"
+          aws s3 cp "$ARTIFACT" "s3://${{ steps.set-bucket.outputs.bucket }}/app/" --acl private
